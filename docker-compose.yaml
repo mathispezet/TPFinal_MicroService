@@ -3,24 +3,58 @@
 version: '3.8'
 
 services:
+  # Votre service applicatif
   message-service:
     build: .
     container_name: message-service
     ports:
-      # Map le port 5002 du conteneur au port 5002 de votre machine
       - "5002:5002"
     volumes:
-      # Permet de recharger le code à la volée pendant le développement
       - .:/app
     environment:
-      # La clé secrète doit être partagée entre les services.
-      # Pour la production, utilisez des secrets Docker ou un fichier .env
+      # La clé secrète JWT
       - JWT_SECRET_KEY=ce-projet-est-genial-on-va-y-arriver
+      
+      # L'URL de connexion à la base de données.
+      # Flask/SQLAlchemy utilisera cette variable pour se connecter.
+      # Notez qu'on utilise 'db' comme nom d'hôte, car c'est le nom du service DB.
+      - DATABASE_URL=mysql+mysqlconnector://user:password@db:3306/irc_messages_db
     networks:
       - irc-network
+    depends_on:
+      # Indique que message-service ne doit démarrer qu'APRES que le service 'db' soit prêt.
+      db:
+        condition: service_healthy 
 
-# Le réseau commun permettra aux services de communiquer entre eux
-# en utilisant leur nom (ex: http://user-service:5001)
+  # Le nouveau service de base de données
+  db:
+    image: mysql:8.0
+    container_name: message-db
+    ports:
+      # Expose le port MySQL sur votre machine pour un accès facile avec un client SQL (ex: DBeaver)
+      - "3307:3306"
+    environment:
+      # Ces variables sont utilisées par l'image MySQL pour l'initialisation
+      - MYSQL_ROOT_PASSWORD=supersecretpassword
+      - MYSQL_DATABASE=irc_messages_db
+      - MYSQL_USER=user
+      - MYSQL_PASSWORD=password
+    volumes:
+      # Ce volume nommé garantit que vos données sont conservées même si le conteneur est supprimé.
+      - mysql-data:/var/lib/mysql
+    networks:
+      - irc-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "--password=root_password"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+# Le réseau commun
 networks:
   irc-network:
     driver: bridge
+
+# Le volume pour la persistance des données
+volumes:
+  mysql-data:
