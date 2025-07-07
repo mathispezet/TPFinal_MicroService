@@ -1,34 +1,42 @@
 # app/models.py
-from . import db  # Importe l'objet 'db' depuis __init__.py
-from datetime import datetime
+
+# 1. On importe l'instance partagée de SQLAlchemy depuis le __init__.py de l'app
+#    Ceci est crucial pour le bon fonctionnement avec le pattern create_app().
+from . import db
+from datetime import datetime, timezone
+import uuid
 
 class Message(db.Model):
+    """
+    Modèle SQLAlchemy pour un message, utilisant une colonne JSON pour les réactions.
+    """
     __tablename__ = 'messages'
-    id = db.Column(db.Integer, primary_key=True)
+
+    # --- Colonnes de la table ---
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    from_user = db.Column(db.String(80), nullable=False)
+    channel = db.Column(db.String(80), nullable=False, index=True)
     text = db.Column(db.Text, nullable=False)
-    author_pseudo = db.Column(db.String(80), nullable=False)
-    channel_name = db.Column(db.String(80), nullable=False)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
-    
-    # Relation pour les réactions
-    reactions = db.relationship('Reaction', backref='message', cascade="all, delete-orphan")
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    reply_to = db.Column(db.String(36), db.ForeignKey('messages.id'), nullable=True)
+
+    # 2. Correction clé : Utilisation de `default=lambda: {}` pour la colonne JSON.
+    #    Ceci évite qu'un même dictionnaire soit partagé par erreur entre tous les nouveaux messages.
+    reactions = db.Column(db.JSON, nullable=False, default=lambda: {})
+
+
+    # --- Méthode de sérialisation ---
 
     def to_dict(self):
-        # Fonction pratique pour convertir l'objet en dictionnaire
+        """Convertit l'objet Message en un dictionnaire pour les réponses API JSON."""
         return {
             "id": self.id,
+            "from_user": self.from_user,
+            "channel": self.channel,
             "text": self.text,
-            "from": self.author_pseudo,
-            "channel": self.channel_name,
-            "timestamp": self.timestamp.isoformat(),
-            "reactions": {r.emoji: r.user_pseudo for r in self.reactions} # Simplifié, à adapter
+            # 3. Amélioration : Formatage robuste pour garantir le format ISO 8601 avec 'Z'.
+            "timestamp": self.timestamp.replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z'),
+            "reply_to": self.reply_to,
+            "reactions": self.reactions
         }
-
-class Reaction(db.Model):
-    __tablename__ = 'reactions'
-    id = db.Column(db.Integer, primary_key=True)
-    message_id = db.Column(db.Integer, db.ForeignKey('messages.id'), nullable=False)
-    user_pseudo = db.Column(db.String(80), nullable=False)
-    emoji = db.Column(db.String(16), nullable=False)
-
-    __table_args__ = (db.UniqueConstraint('message_id', 'user_pseudo', 'emoji'),)
