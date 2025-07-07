@@ -23,7 +23,8 @@ services:
       - irc-network
     depends_on:
       # Indique que message-service ne doit démarrer qu'APRES que le service 'db' soit prêt.
-      - db
+      db:
+        condition: service_healthy 
 
   # Le nouveau service de base de données
   db:
@@ -43,6 +44,11 @@ services:
       - mysql-data:/var/lib/mysql
     networks:
       - irc-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "--password=root_password"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 # Le réseau commun
 networks:
