@@ -1,0 +1,26 @@
+# docker-compose.yml
+
+version: '3.8'
+
+services:
+  message-service:
+    build: .
+    container_name: message-service
+    ports:
+      # Map le port 5002 du conteneur au port 5002 de votre machine
+      - "5002:5002"
+    volumes:
+      # Permet de recharger le code à la volée pendant le développement
+      - .:/app
+    environment:
+      # La clé secrète doit être partagée entre les services.
+      # Pour la production, utilisez des secrets Docker ou un fichier .env
+      - JWT_SECRET_KEY=ce-projet-est-genial-on-va-y-arriver
+    networks:
+      - irc-network
+
+# Le réseau commun permettra aux services de communiquer entre eux
+# en utilisant leur nom (ex: http://user-service:5001)
+networks:
+  irc-network:
+    driver: bridge
