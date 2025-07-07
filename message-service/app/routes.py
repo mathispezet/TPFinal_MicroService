@@ -25,6 +25,7 @@ def health_check():
 @jwt_required
 def post_message():
     """Crée un nouveau message public dans un canal."""
+    # ... (logique inchangée)
     data = request.get_json()
     if not data or 'channel' not in data or 'text' not in data:
         return jsonify({"error": "Payload invalide. 'channel' et 'text' sont requis."}), 400
@@ -33,20 +34,21 @@ def post_message():
         from_user=g.user['pseudo'],
         channel=data['channel'],
         text=data['text'],
-        reply_to=data.get('reply_to') # gère le cas où la clé est absente
+        reply_to=data.get('reply_to')
     )
     db.session.add(new_message)
     db.session.commit()
     
+    # CONFORME : Réponse pour "Succès (création)"
     return jsonify(new_message.to_dict()), 201
 
 @messages_bp.route('/msg', methods=['GET'])
 def get_channel_messages():
     """Récupère les messages d'un canal public avec pagination."""
+    # ... (logique inchangée)
     channel_name = request.args.get('channel')
     if not channel_name:
         return jsonify({"error": "Le paramètre 'channel' est requis."}), 400
-    
     try:
         limit = int(request.args.get('limit', 50))
         offset = int(request.args.get('offset', 0))
@@ -60,6 +62,8 @@ def get_channel_messages():
                                   .all()
     
     messages_list = [msg.to_dict() for msg in messages_query]
+    
+    # CONFORME : Réponse pour "Succès (lecture)"
     return jsonify({"messages": messages_list}), 200
 
 # =================================================================
@@ -76,13 +80,17 @@ def update_message(id):
 
     message_to_update = Message.query.get(id)
     if not message_to_update:
+        # CONFORME : Réponse pour "Erreur (générique)"
         return jsonify({"error": f"Message avec l'ID {id} non trouvé."}), 404
 
     if message_to_update.from_user != g.user['pseudo']:
+        # CONFORME : Réponse pour "Erreur (générique)"
         return jsonify({"error": "Action non autorisée. Vous n'êtes pas l'auteur de ce message."}), 403
 
     message_to_update.text = data['text']
     db.session.commit()
+    
+    # MODIFIÉ : Réponse standardisée pour "Succès (action)"
     return jsonify({"status": "success", "message": "Message mis à jour avec succès."}), 200
 
 @messages_bp.route('/msg/<string:id>', methods=['DELETE'])
@@ -98,6 +106,8 @@ def delete_message(id):
 
     db.session.delete(message_to_delete)
     db.session.commit()
+    
+    # DÉJÀ CONFORME : Réponse pour "Succès (action)"
     return jsonify({"status": "success", "message": "Message supprimé avec succès."}), 200
 
 # =================================================================
@@ -108,6 +118,7 @@ def delete_message(id):
 @jwt_required
 def post_private_message():
     """Envoie un message privé à un autre utilisateur."""
+    # ... (logique inchangée)
     data = request.get_json()
     if not data or 'to' not in data or 'text' not in data:
         return jsonify({"error": "Payload invalide. 'to' et 'text' sont requis."}), 400
@@ -115,17 +126,19 @@ def post_private_message():
     new_private_message = Message(
         from_user=g.user['pseudo'],
         to_user=data['to'],
-        channel=None, # Marque le message comme privé
+        channel=None,
         text=data['text']
     )
     db.session.add(new_private_message)
     db.session.commit()
+    # CONFORME : Réponse pour "Succès (création)"
     return jsonify(new_private_message.to_dict()), 201
 
 @messages_bp.route('/msg/private', methods=['GET'])
 @jwt_required
 def get_private_messages():
     """Récupère la conversation privée entre deux utilisateurs."""
+    # ... (logique inchangée)
     user1 = request.args.get('from')
     user2 = request.args.get('to')
     if not user1 or not user2:
@@ -142,6 +155,7 @@ def get_private_messages():
     ).order_by(Message.timestamp.asc()).all()
 
     messages_list = [msg.to_dict() for msg in conversation_query]
+    # CONFORME : Réponse pour "Succès (lecture)"
     return jsonify({"messages": messages_list}), 200
 
 # =================================================================
@@ -152,46 +166,25 @@ def get_private_messages():
 @jwt_required
 def manage_reaction():
     """Ajoute ou retire une réaction à un message."""
-    # TODO: Implémenter la logique de cette fonction.
-    # 1. Valider le payload : { "message_id": "string", "emoji": "string" }
-    # 2. Récupérer le message : message = Message.query.get(message_id)
-    # 3. Vérifier que le message existe.
-    # 4. Cloner le dictionnaire de réactions pour le modifier : reactions = dict(message.reactions)
-    # 5. Si POST :
-    #    - S'assurer que la liste pour l'emoji existe : reactions.setdefault(emoji, [])
-    #    - Ajouter le pseudo de l'utilisateur (g.user['pseudo']) s'il n'y est pas déjà.
-    # 6. Si DELETE :
-    #    - Si l'emoji existe et que l'utilisateur est dans la liste, le retirer.
-    # 7. Mettre à jour le champ du message : message.reactions = reactions
-    # 8. Sauvegarder : db.session.commit()
-    # 9. Renvoyer une réponse de succès.
+    # TODO: Implémenter la logique en suivant les specs.
+    # La réponse en cas de succès devra être :
+    # return jsonify({"status": "success", "message": "Réaction ajoutée/retirée avec succès."}), 200
     return jsonify({"message": "Route pour les réactions à implémenter"}), 501
 
+# ... (les autres routes squelettes ne changent pas)
 @messages_bp.route('/msg/pinned', methods=['GET'])
-@jwt_required # Probablement requis pour les canaux privés
+@jwt_required
 def get_pinned_messages():
-    """Récupère les messages épinglés d'un canal."""
-    # TODO: Implémenter la logique de cette fonction.
-    # Cette logique dépendra de comment vous décidez de marquer un message comme "épinglé".
-    # (par exemple, via un nouveau champ booléen `is_pinned` dans le modèle Message)
     return jsonify({"message": "Route pour les messages épinglés à implémenter"}), 501
 
 @messages_bp.route('/msg/thread/<string:id>', methods=['GET'])
 def get_message_thread(id):
-    """Récupère toutes les réponses à un message spécifique (fil de discussion)."""
-    # TODO: Implémenter la logique de cette fonction.
-    # Il faudra requêter tous les messages où `reply_to` est égal à `id`.
-    # Pensez à trier par timestamp.
     return jsonify({"message": f"Route pour le thread du message {id} à implémenter"}), 501
 
 @messages_bp.route('/msg/search', methods=['GET'])
 @jwt_required
 def search_messages():
-    """Recherche un mot-clé dans les messages."""
-    # TODO: Implémenter la logique de cette fonction.
     query = request.args.get('q')
     if not query:
         return jsonify({"error": "Le paramètre de requête 'q' est requis."}), 400
-    # Utiliser `Message.query.filter(Message.text.ilike(f'%{query}%'))` pour la recherche.
-    # Pensez à ne chercher que dans les canaux auxquels l'utilisateur a accès.
     return jsonify({"message": "Route de recherche à implémenter"}), 501
