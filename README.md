@@ -25,7 +25,3 @@ message-service/
 ├── docker-compose.yml
 
 └── requirements.txt
-
-  
-
-Génère moi ceci en syntaxe markdown
