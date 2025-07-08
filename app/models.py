@@ -35,7 +35,6 @@ class Message(db.Model):
             "from_user": self.from_user,
             "channel": self.channel,
             "text": self.text,
-            # 3. Amélioration : Formatage robuste pour garantir le format ISO 8601 avec 'Z'.
             "timestamp": self.timestamp.replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z'),
             "reply_to": self.reply_to,
             "reactions": self.reactions
