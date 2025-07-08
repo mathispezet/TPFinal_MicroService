@@ -13,7 +13,7 @@ services:
       - .:/app
     environment:
       # La clé secrète JWT
-      - JWT_SECRET_KEY=ce-projet-est-genial-on-va-y-arriver
+      - JWT_SECRET_KEY=on-ny-arrivera-jamais-enfin-peut-etre
       
       # L'URL de connexion à la base de données.
       # Flask/SQLAlchemy utilisera cette variable pour se connecter.
