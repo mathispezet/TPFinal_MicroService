@@ -44,6 +44,7 @@ services:
       - mysql-data:/var/lib/mysql
     networks:
       - irc-network
+      - traefik
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "--password=root_password"]
       interval: 10s
@@ -54,7 +55,8 @@ services:
 networks:
   irc-network:
     driver: bridge
-
+  traefik:
+    external: false
 # Le volume pour la persistance des données
 volumes:
   mysql-data:

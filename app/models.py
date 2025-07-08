@@ -39,3 +39,4 @@ class Message(db.Model):
             "reply_to": self.reply_to,
             "reactions": self.reactions
         }
+        

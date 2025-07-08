@@ -18,8 +18,8 @@ def create_app(config_class=Config):
     
     # Importer et enregistrer les routes
     from . import routes
-    app.register_blueprint(routes.bp) # Utiliser un Blueprint est encore plus propre
-
+    app.register_blueprint(routes.messages_bp)
+    
     # Créer les tables de la BDD si elles n'existent pas
     with app.app_context():
         db.create_all()
