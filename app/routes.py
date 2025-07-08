@@ -6,70 +6,173 @@ from sqlalchemy.orm.attributes import flag_modified # Nécessaire pour modifier 
 from .models import db, Message
 from .auth import jwt_required
 
+
 # Création d'un Blueprint pour organiser les routes du service de messages
 messages_bp = Blueprint('messages', __name__)
 
 # =================================================================
-# Route de Santé (inchangée)
+# Route de Santé
 # =================================================================
 
 @messages_bp.route('/health', methods=['GET'])
 def health_check():
-    """Route de santé pour vérifier que le service est en ligne."""
+    """Route de santé pour vérifier que le service est en ligne.
+    ---
+    tags:
+      - Health
+    summary: Vérifie la disponibilité du service.
+    responses:
+      200:
+        description: Le service est opérationnel.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  example: "ok"
+                service:
+                  type: string
+                  example: "message-service"
+    """
     return jsonify({"status": "ok", "service": "message-service"}), 200
 
 # =================================================================
-# Routes pour les Messages Publics (inchangées)
+# Routes pour les Messages Publics
 # =================================================================
 
 @messages_bp.route('/msg', methods=['POST'])
 @jwt_required
 def post_message():
-    """Crée un nouveau message public dans un canal."""
-    data = request.get_json()
-    if not data or 'channel' not in data or 'text' not in data:
-        return jsonify({"error": "Payload invalide. 'channel' et 'text' sont requis."}), 400
+    """Crée un nouveau message public dans un canal.
+    ---
+    tags:
+      - Messages
+    summary: Envoie un message dans un canal public.
 
-    new_message = Message(
-        from_user=g.user['pseudo'],
-        channel=data['channel'],
-        text=data['text'],
-        reply_to=data.get('reply_to')
-    )
-    db.session.add(new_message)
-    db.session.commit()
-    return jsonify(new_message.to_dict()), 201
+    consumes:
+      - application/json
+    produces:
+      - application/json
 
-@messages_bp.route('/msg', methods=['GET'])
-def get_channel_messages():
-    """Récupère les messages d'un canal public avec pagination."""
-    channel_name = request.args.get('channel')
-    if not channel_name:
-        return jsonify({"error": "Le paramètre 'channel' est requis."}), 400
-    
+    description: >
+      Crée un nouveau message dans la base de données.
+      Nécessite une authentification JWT (sauf en mode développement).
+      Le corps de la requête doit être un JSON contenant un canal et un texte.
+    security:
+      - bearerAuth: []
+
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/PostMessagePayload'
+          example:            # <-- un exemple aide Swagger UI à pré-remplir le body
+            channel: general
+            text: "Hello world!"
+
+    responses:
+      201:
+        description: Message créé avec succès. Le message nouvellement créé est retourné.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Message'
+      400:
+        description: Payload invalide ou champs manquants.
+      401:
+        description: Token JWT manquant ou invalide.
+      415:
+        description: Média non supporté. Le header 'Content-Type' n'est pas 'application/json'.
+    """
     try:
-        limit = int(request.args.get('limit', 50))
-        offset = int(request.args.get('offset', 0))
-    except ValueError:
-        return jsonify({"error": "Les paramètres 'limit' et 'offset' doivent être des entiers."}), 400
+      print(request.headers)
+      # 1. Lecture du corps de la requête en tant que JSON.
+      # Cette ligne est le "gardien" du format. Elle renverra une erreur 415
+      # si le client n'envoie pas le header 'Content-Type: application/json'.
+      # C'est le comportement attendu et correct.
+      data = request.get_json()
 
-    messages_query = Message.query.filter_by(channel=channel_name)\
-                                  .order_by(Message.timestamp.desc())\
-                                  .offset(offset)\
-                                  .limit(limit)\
-                                  .all()
-    
-    messages_list = [msg.to_dict() for msg in messages_query]
-    return jsonify({"messages": messages_list}), 200
+      print(data, flush=True)
+
+      # 2. Validation des données métier.
+      # On vérifie que les champs nécessaires sont bien présents dans le JSON reçu.
+      if not data or 'channel' not in data or 'text' not in data:
+          return jsonify({"error": "Payload invalide. Les champs 'channel' et 'text' sont requis."}), 400
+
+      # 3. Création de l'objet Message avec les données validées.
+      # Le pseudo de l'utilisateur est récupéré depuis `g.user`, qui est rempli
+      # par le décorateur @jwt_required (soit depuis le token, soit avec le bypass).
+      new_message = Message(
+          from_user=g.user['pseudo'],
+          channel=data['channel'],
+          text=data['text'],
+          reply_to=data.get('reply_to') # .get() pour gérer le cas où reply_to est optionnel
+      )
+
+      # 4. Sauvegarde en base de données.
+      db.session.add(new_message)
+      db.session.commit()
+
+      # 5. Réponse de succès.
+      # On renvoie le nouvel objet message complet (avec son ID et timestamp)
+      # et le code de statut HTTP 201 Created, qui est le standard pour un POST réussi.
+      return jsonify(new_message.to_dict()), 201
+    except Exception as e:
+        print(e)
+        return jsonify({"error" : repr(e)}), 500
 
 # =================================================================
-# Routes pour la Gestion d'un Message Spécifique (inchangées)
+# Routes pour la Gestion d'un Message Spécifique
 # =================================================================
 
 @messages_bp.route('/msg/<string:id>', methods=['PUT'])
 @jwt_required
 def update_message(id):
-    """Modifie le contenu d'un de ses propres messages."""
+    """Modifie le contenu d'un de ses propres messages.
+    ---
+    tags:
+      - Messages
+    summary: Modifie un message existant.
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: ID du message à modifier.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [text]
+            properties:
+              text:
+                type: string
+                description: Le nouveau contenu du message.
+    responses:
+      200:
+        description: Message modifié avec succès.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Message'
+      400:
+        description: Données manquantes.
+      401:
+        description: Token JWT invalide.
+      403:
+        description: Action non autorisée (pas l'auteur).
+      404:
+        description: Message non trouvé.
+    """
     data = request.get_json()
     if not data or 'text' not in data:
         return jsonify({"error": "Le champ 'text' est manquant."}), 400
@@ -83,22 +186,76 @@ def update_message(id):
 @messages_bp.route('/msg/<string:id>', methods=['DELETE'])
 @jwt_required
 def delete_message(id):
-    """Supprime un de ses propres messages."""
+    """Supprime un de ses propres messages.
+    ---
+    tags:
+      - Messages
+    summary: Supprime un message existant.
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: ID du message à supprimer.
+    responses:
+      204:
+        description: Message supprimé avec succès.
+      401:
+        description: Token JWT invalide.
+      403:
+        description: Action non autorisée (pas l'auteur).
+      404:
+        description: Message non trouvé.
+    """
     message_to_delete = Message.query.get_or_404(id)
     if message_to_delete.from_user != g.user['pseudo']:
         return jsonify({"error": "Action non autorisée. Vous n'êtes pas l'auteur de ce message."}), 403
     db.session.delete(message_to_delete)
     db.session.commit()
-    return jsonify({}), 204 # Code 204 No Content est standard pour un DELETE réussi
+    return '', 204
 
 # =================================================================
-# Routes pour les Messages Privés (inchangées)
+# Routes pour les Messages Privés
 # =================================================================
 
 @messages_bp.route('/msg/private', methods=['POST'])
 @jwt_required
 def post_private_message():
-    """Envoie un message privé à un autre utilisateur."""
+    """Envoie un message privé à un autre utilisateur.
+    ---
+    tags:
+        - Messages Privés
+    summary: Envoie un message privé.
+    security:
+        - bearerAuth: []
+    requestBody:
+        required: true
+        content:
+            application/json:
+                schema:
+                    type: object
+                    required: [to, text]
+                    properties:
+                        to:
+                            type: string
+                            description: "Pseudo du destinataire."
+                        text:
+                            type: string
+                            description: "Contenu du message."
+    responses:
+        201:
+            description: Message privé envoyé avec succès.
+            content:
+                application/json:
+                    schema:
+                        $ref: '#/components/schemas/Message'
+        400:
+            description: Données manquantes.
+    """
     data = request.get_json()
     if not data or 'to' not in data or 'text' not in data:
         return jsonify({"error": "Payload invalide. 'to' et 'text' sont requis."}), 400
@@ -113,7 +270,41 @@ def post_private_message():
 @messages_bp.route('/msg/private', methods=['GET'])
 @jwt_required
 def get_private_messages():
-    """Récupère la conversation privée entre deux utilisateurs."""
+    """Récupère la conversation privée entre deux utilisateurs.
+    ---
+    tags:
+        - Messages Privés
+    summary: Récupère une conversation privée.
+    security:
+        - bearerAuth: []
+    parameters:
+        - name: from
+          in: query
+          required: true
+          description: "Le pseudo de l'un des participants."
+          schema:
+            type: string
+        - name: to
+          in: query
+          required: true
+          description: "Le pseudo de l'autre participant."
+          schema:
+            type: string
+    responses:
+        200:
+            description: Liste des messages de la conversation.
+            content:
+                application/json:
+                    schema:
+                        type: object
+                        properties:
+                            messages:
+                                type: array
+                                items:
+                                    $ref: '#/components/schemas/Message'
+        403:
+            description: Accès non autorisé à cette conversation.
+    """
     user1 = request.args.get('from')
     user2 = request.args.get('to')
     if not user1 or not user2:
@@ -129,14 +320,42 @@ def get_private_messages():
     messages_list = [msg.to_dict() for msg in conversation_query]
     return jsonify({"messages": messages_list}), 200
 
+
 # =================================================================
-# Routes Complétées
+# Routes Complémentaires (Réactions, Threads, etc.)
 # =================================================================
 
 @messages_bp.route('/msg/reaction', methods=['POST', 'DELETE'])
 @jwt_required
 def manage_reaction():
-    """Ajoute (POST) ou retire (DELETE) une réaction à un message."""
+    """Ajoute (POST) ou retire (DELETE) une réaction à un message.
+    ---
+    tags:
+      - Reactions
+    summary: Gère les réactions emoji sur un message.
+    description: Utiliser POST pour ajouter une réaction, et DELETE pour la retirer.
+    security:
+      - bearerAuth: []
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ReactionPayload'
+    responses:
+      200:
+        description: Réaction gérée avec succès.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Message'
+      400:
+        description: Données manquantes.
+      401:
+        description: Token JWT invalide.
+      404:
+        description: Message non trouvé.
+    """
     data = request.get_json()
     if not data or 'message_id' not in data or 'emoji' not in data:
         return jsonify({"error": "Payload invalide. 'message_id' et 'emoji' sont requis."}), 400
@@ -145,22 +364,20 @@ def manage_reaction():
     emoji = data['emoji']
     user_pseudo = g.user['pseudo']
     
-    # Assurer que le champ reactions est un dictionnaire
-    if message.reactions is None:
-        message.reactions = {}
+    if message.reactions is None: message.reactions = {}
         
     if request.method == 'POST':
         users_reacted = message.reactions.get(emoji, [])
         if user_pseudo not in users_reacted:
             users_reacted.append(user_pseudo)
             message.reactions[emoji] = users_reacted
-            flag_modified(message, "reactions") # Notifie SQLAlchemy du changement dans le JSON
+            flag_modified(message, "reactions")
             db.session.commit()
     
     elif request.method == 'DELETE':
         if emoji in message.reactions and user_pseudo in message.reactions[emoji]:
             message.reactions[emoji].remove(user_pseudo)
-            if not message.reactions[emoji]: # Si la liste est vide, on supprime la clé emoji
+            if not message.reactions[emoji]:
                 del message.reactions[emoji]
             flag_modified(message, "reactions")
             db.session.commit()
@@ -169,7 +386,33 @@ def manage_reaction():
 
 @messages_bp.route('/msg/pinned', methods=['GET'])
 def get_pinned_messages():
-    """Récupère les messages épinglés d'un canal."""
+    """Récupère les messages épinglés d'un canal.
+    ---
+    tags:
+      - Messages
+    summary: Liste les messages épinglés d'un canal.
+    parameters:
+      - in: query
+        name: channel
+        required: true
+        schema:
+          type: string
+        description: Le nom du canal.
+    responses:
+      200:
+        description: Liste des messages épinglés.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                messages:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Message'
+      400:
+        description: Paramètre 'channel' manquant.
+    """
     channel_name = request.args.get('channel')
     if not channel_name:
         return jsonify({"error": "Le paramètre 'channel' est requis."}), 400
@@ -181,9 +424,37 @@ def get_pinned_messages():
 
 @messages_bp.route('/msg/thread/<string:id>', methods=['GET'])
 def get_message_thread(id):
-    """Récupère toutes les réponses à un message spécifique (fil de discussion)."""
+    """Récupère toutes les réponses à un message spécifique (fil de discussion).
+    ---
+    tags:
+      - Messages
+    summary: Affiche un fil de discussion.
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: ID du message parent du fil.
+    responses:
+      200:
+        description: Le message parent et ses réponses.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                parent:
+                  $ref: '#/components/schemas/Message'
+                replies:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Message'
+      404:
+        description: Message parent non trouvé.
+    """
     parent_message = Message.query.get_or_404(id)
-    
     replies = Message.query.filter_by(reply_to=id)\
                            .order_by(Message.timestamp.asc()).all()
                            
@@ -195,7 +466,37 @@ def get_message_thread(id):
 @messages_bp.route('/msg/search', methods=['GET'])
 @jwt_required
 def search_messages():
-    """Recherche un mot-clé dans les messages."""
+    """Recherche un mot-clé dans les messages.
+    ---
+    tags:
+      - Messages
+    summary: Recherche des messages par mot-clé.
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: query
+        name: q
+        required: true
+        schema:
+          type: string
+        description: Le terme de recherche (2 caractères min).
+    responses:
+      200:
+        description: Liste des messages correspondants.
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                messages:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Message'
+      400:
+        description: Paramètre de recherche 'q' manquant ou trop court.
+      401:
+        description: Token JWT invalide.
+    """
     query = request.args.get('q')
     if not query or len(query) < 2:
         return jsonify({"error": "Le paramètre de requête 'q' est requis (2 caractères min)."}), 400
@@ -206,37 +507,48 @@ def search_messages():
                            
     return jsonify({"messages": [msg.to_dict() for msg in results]}), 200
 
-# Bonus : Routes pour épingler/désépingler
-@messages_bp.route('/msg/<string:id>/pin', methods=['POST'])
+@messages_bp.route('/msg/<string:id>/pin', methods=['POST', 'DELETE'])
 @jwt_required
-def pin_message(id):
-    """Épingle un message. Seuls les administrateurs peuvent effectuer cette action."""
+def pin_unpin_message(id):
+    """Épingle (POST) ou désépingle (DELETE) un message. Admin requis.
+    ---
+    tags:
+      - Admin
+    summary: Gère l'épinglage des messages (Admin).
+    description: POST pour épingler, DELETE pour désépingler. Nécessite le rôle 'admin' dans le JWT.
+    security:
+      - bearerAuth: []
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: ID du message à épingler/désépingler.
+    responses:
+      200:
+        description: Action effectuée avec succès.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Message'
+      401:
+        description: Token JWT invalide.
+      403:
+        description: Action non autorisée (pas administrateur).
+      404:
+        description: Message non trouvé.
+    """
     message = Message.query.get_or_404(id)
-    
-    # Vérification des permissions : on vérifie si l'utilisateur a le rôle 'admin' dans son token.
     user_roles = g.user.get('roles', [])
     if 'admin' not in user_roles:
         return jsonify({"error": "Action non autorisée. Seuls les administrateurs peuvent épingler des messages."}), 403
 
-    message.is_pinned = True
+    if request.method == 'POST':
+        message.is_pinned = True
+    elif request.method == 'DELETE':
+        message.is_pinned = False
+    
     db.session.commit()
-    
-    # Renvoie le message mis à jour pour confirmer l'action.
-    return jsonify(message.to_dict()), 200
-
-@messages_bp.route('/msg/<string:id>/pin', methods=['DELETE'])
-@jwt_required
-def unpin_message(id):
-    """Désépingle un message. Seuls les administrateurs peuvent effectuer cette action."""
-    message = Message.query.get_or_404(id)
-    
-    # Vérification des permissions : identique à la fonction d'épinglage.
-    user_roles = g.user.get('roles', [])
-    if 'admin' not in user_roles:
-        return jsonify({"error": "Action non autorisée. Seuls les administrateurs peuvent désépingler des messages."}), 403
-
-    message.is_pinned = False
-    db.session.commit()
-    
-    # Renvoie le message mis à jour pour confirmer l'action.
     return jsonify(message.to_dict()), 200
