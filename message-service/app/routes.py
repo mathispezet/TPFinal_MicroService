@@ -5,7 +5,7 @@ from sqlalchemy import or_
 from .models import db, Message
 from .auth import jwt_required
 
-# Création d'un Blueprint pour organiser les routes du service de messages
+# On utilise un nom de Blueprint descriptif
 messages_bp = Blueprint('messages', __name__)
 
 # =================================================================
@@ -14,7 +14,6 @@ messages_bp = Blueprint('messages', __name__)
 
 @messages_bp.route('/health', methods=['GET'])
 def health_check():
-    """Route de santé pour vérifier que le service est en ligne."""
     return jsonify({"status": "ok", "service": "message-service"}), 200
 
 # =================================================================
@@ -24,7 +23,6 @@ def health_check():
 @messages_bp.route('/msg', methods=['POST'])
 @jwt_required
 def post_message():
-    """Crée un nouveau message public dans un canal."""
     data = request.get_json()
     if not data or 'channel' not in data or 'text' not in data:
         return jsonify({"error": "Payload invalide. 'channel' et 'text' sont requis."}), 400
@@ -37,154 +35,154 @@ def post_message():
     )
     db.session.add(new_message)
     db.session.commit()
-    
-    # CONFORME : Renvoie l'objet Message complet avec le code 201 Created.
     return jsonify(new_message.to_dict()), 201
 
 @messages_bp.route('/msg', methods=['GET'])
 def get_channel_messages():
-    """Récupère les messages d'un canal public avec pagination."""
     channel_name = request.args.get('channel')
     if not channel_name:
         return jsonify({"error": "Le paramètre 'channel' est requis."}), 400
     
-    try:
-        limit = int(request.args.get('limit', 50))
-        offset = int(request.args.get('offset', 0))
-    except ValueError:
-        return jsonify({"error": "Les paramètres 'limit' et 'offset' doivent être des entiers."}), 400
+    limit = int(request.args.get('limit', 50))
+    offset = int(request.args.get('offset', 0))
 
-    messages_query = Message.query.filter_by(channel=channel_name)\
+    # Logique fusionnée : on exclut les messages épinglés de la vue normale
+    messages_query = Message.query.filter_by(channel=channel_name, is_pinned=False)\
                                   .order_by(Message.timestamp.desc())\
                                   .offset(offset)\
-                                  .limit(limit)\
-                                  .all()
+                                  .limit(limit).all()
     
-    messages_list = [msg.to_dict() for msg in messages_query]
-    
-    # CONFORME : Renvoie une liste de messages avec le code 200 OK.
-    return jsonify({"messages": messages_list}), 200
+    return jsonify({"messages": [msg.to_dict() for msg in messages_query]}), 200
 
 # =================================================================
-# Routes pour la Gestion d'un Message Spécifique
+# Routes pour la Gestion d'un Message Spécifique (Update, Delete, Pin)
 # =================================================================
 
 @messages_bp.route('/msg/<string:id>', methods=['PUT'])
 @jwt_required
 def update_message(id):
-    """Modifie le contenu d'un de ses propres messages."""
+    # Logique restaurée et complète
     data = request.get_json()
     if not data or 'text' not in data:
         return jsonify({"error": "Le champ 'text' est manquant."}), 400
 
-    message_to_update = Message.query.get(id)
-    if not message_to_update:
-        return jsonify({"error": f"Message avec l'ID {id} non trouvé."}), 404
+    message = Message.query.get_or_404(id)
+    if message.from_user != g.user['pseudo']:
+        return jsonify({"error": "Action non autorisée."}), 403
 
-    if message_to_update.from_user != g.user['pseudo']:
-        return jsonify({"error": "Action non autorisée. Vous n'êtes pas l'auteur de ce message."}), 403
-
-    message_to_update.text = data['text']
+    message.text = data['text']
     db.session.commit()
-    
-    # CONFORME : Renvoie un statut de succès pour une action réussie avec le code 200 OK.
     return jsonify({"status": "success", "message": "Message mis à jour avec succès."}), 200
 
 @messages_bp.route('/msg/<string:id>', methods=['DELETE'])
 @jwt_required
 def delete_message(id):
-    """Supprime un de ses propres messages."""
-    message_to_delete = Message.query.get(id)
-    if not message_to_delete:
-        return jsonify({"error": f"Message avec l'ID {id} non trouvé."}), 404
+    # Logique restaurée et complète
+    message = Message.query.get_or_404(id)
+    if message.from_user != g.user['pseudo']:
+        return jsonify({"error": "Action non autorisée."}), 403
 
-    if message_to_delete.from_user != g.user['pseudo']:
-        return jsonify({"error": "Action non autorisée. Vous n'êtes pas l'auteur de ce message."}), 403
-
-    db.session.delete(message_to_delete)
+    db.session.delete(message)
     db.session.commit()
-    
-    # CONFORME : Renvoie un statut de succès pour une action réussie avec le code 200 OK.
     return jsonify({"status": "success", "message": "Message supprimé avec succès."}), 200
 
+@messages_bp.route('/msg/<string:id>/pin', methods=['POST'])
+@jwt_required
+def pin_message(id):
+    # Logique conservée de votre code
+    message = Message.query.get_or_404(id)
+    # TODO: Ajouter une vérification des droits (seul un modérateur peut épingler)
+    message.is_pinned = True
+    db.session.commit()
+    return jsonify(message.to_dict()), 200
+
+@messages_bp.route('/msg/<string:id>/pin', methods=['DELETE'])
+@jwt_required
+def unpin_message(id):
+    # Logique conservée de votre code
+    message = Message.query.get_or_404(id)
+    # TODO: Ajouter une vérification des droits
+    message.is_pinned = False
+    db.session.commit()
+    return jsonify(message.to_dict()), 200
+
 # =================================================================
-# Routes pour les Messages Privés
+# Routes Avancées (Private, Pinned, Thread, Search)
 # =================================================================
 
 @messages_bp.route('/msg/private', methods=['POST'])
 @jwt_required
 def post_private_message():
-    """Envoie un message privé à un autre utilisateur."""
+    # Logique restaurée et complète
     data = request.get_json()
     if not data or 'to' not in data or 'text' not in data:
         return jsonify({"error": "Payload invalide. 'to' et 'text' sont requis."}), 400
 
-    new_private_message = Message(
-        from_user=g.user['pseudo'],
-        to_user=data['to'],
-        channel=None, # Marque le message comme privé
-        text=data['text']
-    )
-    db.session.add(new_private_message)
+    new_message = Message(from_user=g.user['pseudo'], to_user=data['to'], text=data['text'])
+    db.session.add(new_message)
     db.session.commit()
-    
-    # CONFORME : Renvoie l'objet Message complet avec le code 201 Created.
-    return jsonify(new_private_message.to_dict()), 201
+    return jsonify(new_message.to_dict()), 201
 
 @messages_bp.route('/msg/private', methods=['GET'])
 @jwt_required
 def get_private_messages():
-    """Récupère la conversation privée entre deux utilisateurs."""
+    # Logique restaurée et complète
     user1 = request.args.get('from')
     user2 = request.args.get('to')
     if not user1 or not user2:
         return jsonify({"error": "Les paramètres 'from' et 'to' sont requis."}), 400
 
     if g.user['pseudo'] not in [user1, user2]:
-        return jsonify({"error": "Accès non autorisé à cette conversation privée."}), 403
+        return jsonify({"error": "Accès non autorisé."}), 403
 
-    conversation_query = Message.query.filter(
-        or_(
-            (Message.from_user == user1) & (Message.to_user == user2),
-            (Message.from_user == user2) & (Message.to_user == user1)
-        )
-    ).order_by(Message.timestamp.asc()).all()
+    conversation = Message.query.filter(or_((Message.from_user == user1) & (Message.to_user == user2), (Message.from_user == user2) & (Message.to_user == user1))).order_by(Message.timestamp.asc()).all()
+    return jsonify({"messages": [msg.to_dict() for msg in conversation]}), 200
 
-    messages_list = [msg.to_dict() for msg in conversation_query]
+@messages_bp.route('/msg/pinned', methods=['GET'])
+def get_pinned_messages():
+    # Logique conservée de votre code
+    channel_name = request.args.get('channel')
+    if not channel_name:
+        return jsonify({"error": "Le paramètre 'channel' est requis."}), 400
     
-    # CONFORME : Renvoie une liste de messages avec le code 200 OK.
-    return jsonify({"messages": messages_list}), 200
+    pinned_messages = Message.query.filter_by(channel=channel_name, is_pinned=True).order_by(Message.timestamp.desc()).all()
+    return jsonify({"messages": [msg.to_dict() for msg in pinned_messages]}), 200
+
+@messages_bp.route('/msg/thread/<string:id>', methods=['GET'])
+def get_message_thread(id):
+    # Logique conservée et adaptée aux UUIDs
+    parent_message = Message.query.get_or_404(id)
+    thread_messages = Message.query.filter_by(reply_to=id).order_by(Message.timestamp.asc()).all()
+    response_data = {
+        "parent_message": parent_message.to_dict(),
+        "replies": [msg.to_dict() for msg in thread_messages]
+    }
+    return jsonify(response_data), 200
+
+@messages_bp.route('/msg/search', methods=['GET'])
+def search_messages():
+    # Logique conservée de votre code
+    query = request.args.get('q')
+    if not query or len(query) < 3:
+        return jsonify({"error": "Le paramètre 'q' doit contenir au moins 3 caractères."}), 400
+    
+    search_pattern = f"%{query}%"
+    channel_name = request.args.get('channel')
+    
+    query_builder = Message.query.filter(Message.text.ilike(search_pattern))
+    if channel_name:
+        query_builder = query_builder.filter_by(channel=channel_name)
+        
+    search_results = query_builder.order_by(Message.timestamp.desc()).all()
+    return jsonify({"messages": [msg.to_dict() for msg in search_results]}), 200
 
 # =================================================================
-# Squelettes des Fonctionnalités Restantes
+# Squelette Final
 # =================================================================
 
 @messages_bp.route('/msg/reaction', methods=['POST', 'DELETE'])
 @jwt_required
 def manage_reaction():
     """Ajoute ou retire une réaction à un message."""
-    # TODO: Implémenter la logique de cette fonction.
+    # TODO: Implémenter la logique de cette fonction
     return jsonify({"message": "Route pour les réactions à implémenter"}), 501
-
-@messages_bp.route('/msg/pinned', methods=['GET'])
-@jwt_required
-def get_pinned_messages():
-    """Récupère les messages épinglés d'un canal."""
-    # TODO: Implémenter la logique de cette fonction.
-    return jsonify({"message": "Route pour les messages épinglés à implémenter"}), 501
-
-@messages_bp.route('/msg/thread/<string:id>', methods=['GET'])
-def get_message_thread(id):
-    """Récupère toutes les réponses à un message spécifique (fil de discussion)."""
-    # TODO: Implémenter la logique de cette fonction.
-    return jsonify({"message": f"Route pour le thread du message {id} à implémenter"}), 501
-
-@messages_bp.route('/msg/search', methods=['GET'])
-@jwt_required
-def search_messages():
-    """Recherche un mot-clé dans les messages."""
-    query = request.args.get('q')
-    if not query:
-        return jsonify({"error": "Le paramètre de requête 'q' est requis."}), 400
-    # TODO: Implémenter la logique de cette fonction.
-    return jsonify({"message": "Route de recherche à implémenter"}), 501
